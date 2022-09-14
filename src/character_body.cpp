@@ -362,6 +362,7 @@ void Character::update_body( const time_point &from, const time_point &to )
 Assumption 1 : a naked person is comfortable at 19C/66.2F (31C/87.8F at rest).
 Assumption 2 : a "lightly clothed" person is comfortable at 13C/55.4F (25C/77F at rest).
 Assumption 3 : the player is always running, thus generating more heat.
+* Maybe this could use activity level to determine how much heat player is generating.
 Assumption 4 : frostbite cannot happen above 0C temperature.*
 * In the current model, a naked person can get frostbite at 1C. This isn't true, but it's a compromise with using nice whole numbers.
 
@@ -402,7 +403,7 @@ void Character::update_bodytemp()
     /* Cache calls to g->get_temperature( player position ), used in several places in function */
     const units::temperature player_local_temp = weather_man.get_temperature( pos() );
     // NOTE : visit weather.h for some details on the numbers used
-    // Converts temperature to Celsius/10
+    // Converts temperature to Celsius/100
     int Ctemperature = static_cast<int>( 100 * units::to_celcius( player_local_temp ) );
     const w_point weather = *weather_man.weather_precise;
     int vehwindspeed = 0;
@@ -427,7 +428,8 @@ void Character::update_bodytemp()
     const bool use_floor_warmth = can_use_floor_warmth();
     const furn_id furn_at_pos = here.furn( pos() );
     const cata::optional<vpart_reference> boardable = vp.part_with_feature( "BOARDABLE", true );
-    // Temperature norms
+    // Temperature norms, unit in Celsius/100
+    // This means which temperature is comfortable for a naked person
     // Ambient normal temperature is lower while asleep
     const int ambient_norm = has_sleep ? 3100 : 1900;
 
@@ -523,8 +525,9 @@ void Character::update_bodytemp()
 
         // Convergent temperature is affected by ambient temperature,
         // clothing warmth, and body wetness.
-        int temp = BODYTEMP_NORM + adjusted_temp + clothing_warmth_adjustment + bp_temp_min +
-                   units::to_kelvin( windchill ) * 1.8 * 100; // dT(K) * 1.8 = dT(F)
+        // 0.01c is 5u body temerature so times 5
+        int temp = BODYTEMP_NORM + adjusted_temp * 5 + clothing_warmth_adjustment + bp_temp_min +
+                   units::to_kelvin( windchill ) * 5 * 100; // dT(K) * 1.8 = dT(F)
         set_part_temp_conv( bp, temp );
         // HUNGER / STARVATION
         mod_part_temp_conv( bp, hunger_warmth );
