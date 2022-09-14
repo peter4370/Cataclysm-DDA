@@ -486,8 +486,7 @@ void Character::update_bodytemp()
             continue;
         }
 
-        // This adjusts the temperature scale to match the bodytemp scale,
-        // it needs to be reset every iteration
+        // It needs to be reset every iteration
         int adjusted_temp = Ctemperature - ambient_norm;
         // Represents the fact that the body generates heat when it is cold.
         // TODO: : should this increase hunger?
