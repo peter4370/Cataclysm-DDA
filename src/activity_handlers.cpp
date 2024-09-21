@@ -108,7 +108,6 @@ enum class creature_size : int;
 
 #define dbg(x) DebugLog((x),D_GAME) << __FILE__ << ":" << __LINE__ << ": "
 
-static const activity_id ACT_ADV_INVENTORY( "ACT_ADV_INVENTORY" );
 static const activity_id ACT_ARMOR_LAYERS( "ACT_ARMOR_LAYERS" );
 static const activity_id ACT_ATM( "ACT_ATM" );
 static const activity_id ACT_BLEED( "ACT_BLEED" );
@@ -168,10 +167,8 @@ static const activity_id ACT_VEHICLE( "ACT_VEHICLE" );
 static const activity_id ACT_VEHICLE_DECONSTRUCTION( "ACT_VEHICLE_DECONSTRUCTION" );
 static const activity_id ACT_VEHICLE_REPAIR( "ACT_VEHICLE_REPAIR" );
 static const activity_id ACT_VIBE( "ACT_VIBE" );
-static const activity_id ACT_VIEW_RECIPE( "ACT_VIEW_RECIPE" );
 static const activity_id ACT_WAIT( "ACT_WAIT" );
 static const activity_id ACT_WAIT_NPC( "ACT_WAIT_NPC" );
-static const activity_id ACT_WAIT_STAMINA( "ACT_WAIT_STAMINA" );
 static const activity_id ACT_WAIT_WEATHER( "ACT_WAIT_WEATHER" );
 
 static const ammotype ammo_battery( "battery" );
@@ -278,9 +275,7 @@ activity_handlers::do_turn_functions = {
     { ACT_CONSUME_FOOD_MENU, consume_food_menu_do_turn },
     { ACT_CONSUME_DRINK_MENU, consume_drink_menu_do_turn },
     { ACT_CONSUME_MEDS_MENU, consume_meds_menu_do_turn },
-    { ACT_VIEW_RECIPE, view_recipe_do_turn },
     { ACT_MOVE_LOOT, move_loot_do_turn },
-    { ACT_ADV_INVENTORY, adv_inventory_do_turn },
     { ACT_ARMOR_LAYERS, armor_layers_do_turn },
     { ACT_ATM, atm_do_turn },
     { ACT_FISH, fish_do_turn },
@@ -297,7 +292,6 @@ activity_handlers::do_turn_functions = {
     { ACT_ROBOT_CONTROL, robot_control_do_turn },
     { ACT_TREE_COMMUNION, tree_communion_do_turn },
     { ACT_STUDY_SPELL, study_spell_do_turn },
-    { ACT_WAIT_STAMINA, wait_stamina_do_turn },
     { ACT_MULTIPLE_CRAFT, multiple_craft_do_turn },
     { ACT_MULTIPLE_DIS, multiple_dis_do_turn },
     { ACT_MULTIPLE_READ, multiple_read_do_turn },
@@ -337,7 +331,6 @@ activity_handlers::finish_functions = {
     { ACT_WAIT, wait_finish },
     { ACT_WAIT_WEATHER, wait_weather_finish },
     { ACT_WAIT_NPC, wait_npc_finish },
-    { ACT_WAIT_STAMINA, wait_stamina_finish },
     { ACT_SOCIALIZE, socialize_finish },
     { ACT_OPERATION, operation_finish },
     { ACT_VIBE, vibe_finish },
@@ -346,7 +339,6 @@ activity_handlers::finish_functions = {
     { ACT_CONSUME_FOOD_MENU, eat_menu_finish },
     { ACT_CONSUME_DRINK_MENU, eat_menu_finish },
     { ACT_CONSUME_MEDS_MENU, eat_menu_finish },
-    { ACT_VIEW_RECIPE, view_recipe_finish },
     { ACT_JACKHAMMER, jackhammer_finish },
     { ACT_ROBOT_CONTROL, robot_control_finish },
     { ACT_PULL_CREATURE, pull_creature_finish },
@@ -2812,85 +2804,32 @@ void activity_handlers::eat_menu_do_turn( player_activity *, Character *you )
     }
 
     avatar &player_character = get_avatar();
-    avatar_action::eat_or_use( player_character, game_menus::inv::consume( player_character ) );
+    avatar_action::eat_or_use( player_character, game_menus::inv::consume() );
 }
 
 void activity_handlers::consume_food_menu_do_turn( player_activity *, Character * )
 {
     avatar &player_character = get_avatar();
-    item_location loc = game_menus::inv::consume_food( player_character );
+    item_location loc = game_menus::inv::consume_food();
     avatar_action::eat( player_character, loc );
 }
 
 void activity_handlers::consume_drink_menu_do_turn( player_activity *, Character * )
 {
     avatar &player_character = get_avatar();
-    item_location loc = game_menus::inv::consume_drink( player_character );
+    item_location loc = game_menus::inv::consume_drink();
     avatar_action::eat( player_character, loc );
 }
 
 void activity_handlers::consume_meds_menu_do_turn( player_activity *, Character * )
 {
     avatar &player_character = get_avatar();
-    avatar_action::eat_or_use( player_character, game_menus::inv::consume_meds( player_character ) );
-}
-
-void activity_handlers::view_recipe_do_turn( player_activity *act, Character *you )
-{
-    if( !you->is_avatar() ) {
-        return;
-    }
-
-    recipe_id id( act->name );
-    std::string itname;
-    if( act->index != 0 ) {
-        // act->name is recipe_id
-        itname = id->result_name();
-        if( !you->get_group_available_recipes().contains( &id.obj() ) ) {
-            add_msg( m_info, _( "You don't know how to craft the %s!" ), itname );
-            return;
-        }
-        you->craft( std::nullopt, id );
-        return;
-    }
-    // act->name is itype_id
-    itype_id item( act->name );
-    itname = item->nname( 1U );
-
-    bool is_byproduct = false;  // product or byproduct
-    bool can_craft = false;
-    // Does a recipe for the item exist?
-    for( const auto& [_, r] : recipe_dict ) {
-        if( !r.obsolete && ( item == r.result() || r.in_byproducts( item ) ) ) {
-            is_byproduct = true;
-            // If a recipe exists, does my group know it?
-            if( you->get_group_available_recipes().contains( &r ) ) {
-                can_craft = true;
-                break;
-            }
-        }
-    }
-    if( !is_byproduct ) {
-        add_msg( m_info, _( "You wonder if it's even possible to craft the %s…" ), itname );
-        return;
-    } else if( !can_craft ) {
-        add_msg( m_info, _( "You don't know how to craft the %s!" ), itname );
-        return;
-    }
-
-    std::string filterstring = string_format( "r:%s", itname );
-    you->craft( std::nullopt, recipe_id(), filterstring );
+    avatar_action::eat_or_use( player_character, game_menus::inv::consume_meds() );
 }
 
 void activity_handlers::move_loot_do_turn( player_activity *act, Character *you )
 {
     activity_on_turn_move_loot( *act, *you );
-}
-
-void activity_handlers::adv_inventory_do_turn( player_activity *, Character *you )
-{
-    you->cancel_activity();
-    create_advanced_inv();
 }
 
 void activity_handlers::travel_do_turn( player_activity *act, Character *you )
@@ -2932,7 +2871,8 @@ void activity_handlers::travel_do_turn( player_activity *act, Character *you )
             const activity_id act_travel = ACT_TRAVELLING;
             you->set_destination( route_to, player_activity( act_travel ) );
         } else {
-            you->add_msg_if_player( _( "You cannot reach that destination" ) );
+            you->add_msg_if_player( m_warning, _( "You cannot reach that destination." ) );
+            ui::omap::force_quit();
         }
     } else {
         you->add_msg_if_player( m_info, _( "You have reached your destination." ) );
@@ -3114,38 +3054,6 @@ void activity_handlers::find_mount_do_turn( player_activity *act, Character *you
 void activity_handlers::wait_npc_finish( player_activity *act, Character *you )
 {
     you->add_msg_if_player( _( "%s finishes with you…" ), act->str_values[0] );
-    act->set_to_null();
-}
-
-void activity_handlers::wait_stamina_do_turn( player_activity *act, Character *you )
-{
-    int stamina_threshold = you->get_stamina_max();
-    if( !act->values.empty() ) {
-        stamina_threshold = act->values[0];
-        // remember initial stamina, only for waiting-with-threshold
-        if( act->values.size() == 1 ) {
-            act->values.push_back( you->get_stamina() );
-        }
-    }
-    if( you->get_stamina() >= stamina_threshold ) {
-        wait_stamina_finish( act, you );
-    }
-}
-
-void activity_handlers::wait_stamina_finish( player_activity *act, Character *you )
-{
-    if( !act->values.empty() ) {
-        const int stamina_threshold = act->values[0];
-        const int stamina_initial = ( act->values.size() > 1 ) ? act->values[1] : you->get_stamina();
-        if( you->get_stamina() < stamina_threshold && you->get_stamina() <= stamina_initial ) {
-            debugmsg( "Failed to wait until stamina threshold %d reached, only at %d. You may not be regaining stamina.",
-                      act->values.front(), you->get_stamina() );
-        }
-    } else if( you->get_stamina() < you->get_stamina_max() ) {
-        you->add_msg_if_player( _( "You are bored of waiting, so you stop." ) );
-    } else {
-        you->add_msg_if_player( _( "You finish waiting and feel refreshed." ) );
-    }
     act->set_to_null();
 }
 
@@ -3535,11 +3443,6 @@ void activity_handlers::atm_finish( player_activity *act, Character * )
 void activity_handlers::eat_menu_finish( player_activity *, Character * )
 {
     // Only exists to keep the eat activity alive between turns
-}
-
-void activity_handlers::view_recipe_finish( player_activity *act, Character * )
-{
-    act->set_to_null();
 }
 
 void activity_handlers::jackhammer_do_turn( player_activity *act, Character * )

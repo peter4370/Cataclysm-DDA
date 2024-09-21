@@ -195,6 +195,7 @@
 #include "translations.h"
 #include "trap.h"
 #include "ui.h"
+#include "ui_extended_description.h"
 #include "ui_manager.h"
 #include "uistate.h"
 #include "units.h"
@@ -234,7 +235,6 @@ static const activity_id ACT_SKIN( "ACT_SKIN" );
 static const activity_id ACT_TRAIN( "ACT_TRAIN" );
 static const activity_id ACT_TRAIN_TEACHER( "ACT_TRAIN_TEACHER" );
 static const activity_id ACT_TRAVELLING( "ACT_TRAVELLING" );
-static const activity_id ACT_VIEW_RECIPE( "ACT_VIEW_RECIPE" );
 
 static const ascii_art_id ascii_art_ascii_tombstone( "ascii_tombstone" );
 
@@ -1892,6 +1892,47 @@ static hint_rating rate_action_view_recipe( avatar &you, const item &it )
     return hint_rating::iffy;
 }
 
+static void view_recipe_crafting_menu( const item &it )
+{
+    avatar &you = get_avatar();
+    std::string itname;
+    if( it.is_craft() ) {
+        recipe_id id = it.get_making().ident();
+        if( !you.get_group_available_recipes().contains( &id.obj() ) ) {
+            add_msg( m_info, _( "You don't know how to craft the %s!" ), id->result_name() );
+            return;
+        }
+        you.craft( std::nullopt, id );
+        return;
+    }
+    itype_id item = it.typeId();
+    itname = item->nname( 1U );
+
+    bool is_byproduct = false;  // product or byproduct
+    bool can_craft = false;
+    // Does a recipe for the item exist?
+    for( const auto& [_, r] : recipe_dict ) {
+        if( !r.obsolete && ( item == r.result() || r.in_byproducts( item ) ) ) {
+            is_byproduct = true;
+            // If a recipe exists, does my group know it?
+            if( you.get_group_available_recipes().contains( &r ) ) {
+                can_craft = true;
+                break;
+            }
+        }
+    }
+    if( !is_byproduct ) {
+        add_msg( m_info, _( "You wonder if it's even possible to craft the %s…" ), itname );
+        return;
+    } else if( !can_craft ) {
+        add_msg( m_info, _( "You don't know how to craft the %s!" ), itname );
+        return;
+    }
+
+    std::string filterstring = string_format( "r:%s", itname );
+    you.craft( std::nullopt, recipe_id(), filterstring );
+}
+
 static hint_rating rate_action_eat( const avatar &you, const item &it )
 {
     if( it.is_container() ) {
@@ -2237,7 +2278,7 @@ int game::inventory_item_menu( item_location locThisItem,
                     if( !locThisItem.get_item()->is_container() ) {
                         avatar_action::eat( u, locThisItem );
                     } else {
-                        avatar_action::eat_or_use( u, game_menus::inv::consume( u, locThisItem ) );
+                        avatar_action::eat_or_use( u, game_menus::inv::consume( locThisItem ) );
                     }
                     break;
                 case 'W': {
@@ -2309,28 +2350,21 @@ int game::inventory_item_menu( item_location locThisItem,
                     }
                     break;
                 case 'V': {
-                    int is_recipe = 0;
-                    std::string this_itype = oThisItem.typeId().str();
-                    if( oThisItem.is_craft() ) {
-                        this_itype = oThisItem.get_making().ident().str();
-                        is_recipe = 1;
-                    }
-                    player_activity recipe_act = player_activity( ACT_VIEW_RECIPE, 0, is_recipe, 0, this_itype );
-                    u.assign_activity( recipe_act );
+                    view_recipe_crafting_menu( oThisItem );
                     break;
                 }
                 case 'i':
                     if( oThisItem.is_container() ) {
-                        game_menus::inv::insert_items( u, locThisItem );
+                        game_menus::inv::insert_items( locThisItem );
                     }
                     break;
                 case 'o':
                     if( oThisItem.is_container() && oThisItem.num_item_stacks() > 0 ) {
-                        game_menus::inv::common( locThisItem, u );
+                        game_menus::inv::common( locThisItem );
                     }
                     break;
                 case '=':
-                    game_menus::inv::reassign_letter( u, oThisItem );
+                    game_menus::inv::reassign_letter( oThisItem );
                     break;
                 case KEY_PPAGE:
                     iScrollPos -= iScrollHeight;
@@ -3226,7 +3260,6 @@ void game::load_packs( const std::string &msg, const std::vector<mod_id> &packs 
         }
         load_data_from_dir( mod.path, mod.ident.str() );
     }
-    loading_ui::done();
 
     std::unordered_set<mod_id> removed_mods {
         MOD_INFORMATION_Graphical_Overmap // Removed in 0.I
@@ -4264,7 +4297,7 @@ Creature *game::is_hostile_within( int distance, bool dangerous )
 field_entry *game::is_in_dangerous_field()
 {
     map &here = get_map();
-    for( std::pair<const field_type_id, field_entry> &field : here.field_at( u.pos() ) ) {
+    for( std::pair<const field_type_id, field_entry> &field : here.field_at( u.pos_bub() ) ) {
         if( u.is_dangerous_field( field.second ) ) {
             return &field.second;
         }
@@ -6023,13 +6056,13 @@ void game::pickup()
         return;
     }
     // Pick up items only from the selected tile
-    u.pick_up( game_menus::inv::pickup( u, *where_ ) );
+    u.pick_up( game_menus::inv::pickup( *where_ ) );
 }
 
 void game::pickup_all()
 {
     // Pick up items from current and all adjacent tiles
-    u.pick_up( game_menus::inv::pickup( u ) );
+    u.pick_up( game_menus::inv::pickup() );
 }
 
 void game::pickup( const tripoint &p )
@@ -6046,7 +6079,7 @@ void game::pickup( const tripoint_bub_ms &p )
     add_draw_callback( hilite_cb );
 
     // Pick up items only from the selected tile
-    u.pick_up( game_menus::inv::pickup( u, p ) );
+    u.pick_up( game_menus::inv::pickup( p ) );
 }
 
 //Shift player by one tile, look_around(), then restore previous position.
@@ -7421,6 +7454,9 @@ look_around_result game::look_around(
         ctxt.register_action( "LEVEL_DOWN" );
     }
     ctxt.register_action( "TOGGLE_FAST_SCROLL" );
+    if( !has_first_point && !select_zone && !peeking && !is_moving_zone ) {
+        ctxt.register_action( "map" );
+    }
     ctxt.register_action( "CHANGE_MONSTER_NAME" );
     ctxt.register_action( "EXTENDED_DESCRIPTION" );
     ctxt.register_action( "SELECT" );
@@ -7582,6 +7618,11 @@ look_around_result game::look_around(
             list_items_monsters();
         } else if( action == "TOGGLE_FAST_SCROLL" ) {
             fast_scroll = !fast_scroll;
+        } else if( action == "map" ) {
+            uistate.open_menu = [center]() {
+                ui::omap::look_around_map( get_map().getglobal( center ) );
+            };
+            break;
         } else if( action == "toggle_pixel_minimap" ) {
             toggle_pixel_minimap();
 
@@ -7632,8 +7673,8 @@ look_around_result game::look_around(
         } else if( action == "debug_hour_timer" ) {
             toggle_debug_hour_timer();
         } else if( action == "EXTENDED_DESCRIPTION" ) {
-            // TODO: fix point types
-            extended_description( lp.raw() );
+            extended_description_window ext_desc( lp );
+            ext_desc.show();
         } else if( action == "CHANGE_MONSTER_NAME" ) {
             creature_tracker &creatures = get_creature_tracker();
             monster *const mon = creatures.creature_at<monster>( lp, true );
@@ -8406,7 +8447,7 @@ game::vmenu_ret game::list_items( const std::vector<map_item_stack> &item_list )
     do {
         bool recalc_unread = false;
         if( action == "COMPARE" && activeItem ) {
-            game_menus::inv::compare( u, active_pos );
+            game_menus::inv::compare( active_pos );
             recalc_unread = highlight_unread_items;
         } else if( action == "FILTER" ) {
             ui.invalidate_ui();
@@ -9036,13 +9077,13 @@ void game::insert_item()
         return;
     }
 
-    game_menus::inv::insert_items( u, item_loc );
+    game_menus::inv::insert_items( item_loc );
 }
 
 void game::unload_container()
 {
     if( const std::optional<tripoint> pnt = choose_adjacent( _( "Unload where?" ) ) ) {
-        u.drop( game_menus::inv::unload_container( u ), *pnt );
+        u.drop( game_menus::inv::unload_container(), *pnt );
     }
 }
 
@@ -9947,7 +9988,7 @@ void game::wield( item_location loc )
     // Can't use loc.obtain() here because that would cause things to spill.
     item to_wield = *loc.get_item();
     item_location::type location_type = loc.where();
-    tripoint pos = loc.position();
+    tripoint_bub_ms pos = loc.pos_bub();
     const int obtain_cost = loc.obtain_cost( u );
     int worn_index = INT_MIN;
 
@@ -10003,7 +10044,7 @@ void game::wield( item_location loc )
 
 void game::wield()
 {
-    item_location loc = game_menus::inv::wield( u );
+    item_location loc = game_menus::inv::wield();
 
     if( loc ) {
         wield( loc );
@@ -10377,13 +10418,16 @@ bool game::walk_move( const tripoint &dest_loc, const bool via_ramp, const bool 
     }
     const optional_vpart_position vp_here = m.veh_at( u.pos_bub() );
     const optional_vpart_position vp_there = m.veh_at( dest_loc );
+    const optional_vpart_position vp_grab = m.veh_at( u.pos_bub() + u.grab_point );
+    const vehicle *grabbed_vehicle = veh_pointer_or_null( vp_grab );
 
     bool pushing = false; // moving -into- grabbed tile; skip check for move_cost > 0
     bool pulling = false; // moving -away- from grabbed tile; check for move_cost > 0
     bool shifting_furniture = false; // moving furniture and staying still; skip check for move_cost > 0
 
     const tripoint_bub_ms furn_pos = u.pos_bub() + u.grab_point;
-    const tripoint furn_dest = dest_loc + tripoint( u.grab_point.xy().raw(), 0 );
+    const tripoint_bub_ms furn_dest = tripoint_bub_ms( dest_loc ) + tripoint_rel_ms( u.grab_point.xy(),
+                                      0 );
 
     bool grabbed = u.get_grab_type() != object_type::NONE;
     if( grabbed ) {
@@ -10393,8 +10437,6 @@ bool game::walk_move( const tripoint &dest_loc, const bool via_ramp, const bool 
     }
 
     // Now make sure we're actually holding something
-    const vehicle *grabbed_vehicle = nullptr;
-    const optional_vpart_position vp_grabbed = m.veh_at( u.pos_bub() + u.grab_point );
     if( grabbed && u.get_grab_type() == object_type::FURNITURE ) {
         // We only care about shifting, because it's the only one that can change our destination
         if( m.has_furn( u.pos_bub() + u.grab_point ) ) {
@@ -10404,10 +10446,16 @@ bool game::walk_move( const tripoint &dest_loc, const bool via_ramp, const bool 
             grabbed = false;
         }
     } else if( grabbed && u.get_grab_type() == object_type::VEHICLE ) {
-        grabbed_vehicle = veh_pointer_or_null( m.veh_at( u.pos_bub() + u.grab_point ) );
-        if( grabbed_vehicle == nullptr ) {
+        if( !vp_grab ) {
             // We were grabbing a vehicle that isn't there anymore
             grabbed = false;
+        }
+        //can't board vehicle with solid parts while grabbing it
+        else if( vp_there && !pushing && !m.impassable( dest_loc ) &&
+                 !empty( grabbed_vehicle->get_avail_parts( VPFLAG_OBSTACLE ) ) &&
+                 &vp_there->vehicle() == grabbed_vehicle ) {
+            add_msg( m_warning, _( "You move into the %s, releasing it." ), grabbed_vehicle->name );
+            u.grab( object_type::NONE );
         }
     } else if( grabbed ) {
         // We were grabbing something WEIRD, let's pretend we weren't
@@ -10643,12 +10691,12 @@ bool game::walk_move( const tripoint &dest_loc, const bool via_ramp, const bool 
 
     if( grabbed_vehicle ) {
         // Vehicle might be at different z level than the grabbed part.
-        u.grab_point.z() = vp_grabbed->pos().z - u.posz();
+        u.grab_point.z() = vp_grab->pos().z - u.posz();
     }
 
     if( pulling ) {
-        const tripoint shifted_furn_pos = furn_pos.raw() - ms_shift;
-        const tripoint shifted_furn_dest = furn_dest - ms_shift;
+        const tripoint_bub_ms shifted_furn_pos = furn_pos - ms_shift;
+        const tripoint_bub_ms shifted_furn_dest = furn_dest - ms_shift;
         const time_duration fire_age = m.get_field_age( shifted_furn_pos, fd_fire );
         const int fire_intensity = m.get_field_intensity( shifted_furn_pos, fd_fire );
         m.remove_field( shifted_furn_pos, fd_fire );
@@ -10931,11 +10979,11 @@ point game::place_player( const tripoint &dest_loc, bool quick )
                     }
                 }
                 if( !places.empty() ) {
-                    u.assign_activity( pulp_activity_actor( places, true ) );
+                    u.assign_activity( pulp_activity_actor( places ) );
                 }
             } else {
                 if( corpse_available( u.pos_bub() ) ) {
-                    u.assign_activity( pulp_activity_actor( m.getglobal( u.pos_bub() ), true ) );
+                    u.assign_activity( pulp_activity_actor( m.getglobal( u.pos_bub() ) ) );
                 }
             }
         }
@@ -11449,7 +11497,7 @@ bool game::grabbed_furn_move( const tripoint &dp )
     if( fire_intensity == 1 && !pulling_furniture ) {
         m.remove_field( fpos, fd_fire );
         m.set_field_intensity( fdest, fd_fire, fire_intensity );
-        m.set_field_age( fdest.raw(), fd_fire, fire_age );
+        m.set_field_age( fdest, fd_fire, fire_age );
     }
 
     // Is there is only liquids on the ground, remove them after moving furniture.
@@ -12243,7 +12291,7 @@ void game::vertical_move( int movez, bool force, bool peeking )
 
     here.invalidate_map_cache( here.get_abs_sub().z() );
     // Upon force movement, traps can not be avoided.
-    if( !wall_cling && ( get_map().tr_at( u.pos() ) == tr_ledge &&
+    if( !wall_cling && ( get_map().tr_at( u.pos_bub() ) == tr_ledge &&
                          !u.has_effect( effect_gliding ) ) )  {
         here.creature_on_trap( u, !force );
     }
@@ -12318,19 +12366,23 @@ std::optional<tripoint> game::find_stairs( const map &mp, int z_after, const tri
     int best = INT_MAX;
     std::optional<tripoint> stairs;
     const int omtilesz = SEEX * 2 - 1;
-    real_coords rc( mp.getabs( pos.xy() ) );
-    tripoint omtile_align_start( mp.getlocal( rc.begin_om_pos() ), z_after );
-    tripoint omtile_align_end( omtile_align_start + point( omtilesz, omtilesz ) );
+    const tripoint_abs_ms abs_omt_base( project_to<coords::ms>( project_to<coords::omt>( mp.getglobal(
+                                            pos ) ) ) );
 
-    if( get_map().tr_at( u.pos() ) != tr_ledge ) {
-        for( const tripoint &dest : mp.points_in_rectangle( omtile_align_start, omtile_align_end ) ) {
-            if( rl_dist( u.pos(), dest ) <= best &&
+    tripoint_bub_ms omtile_align_start( mp.bub_from_abs( tripoint_abs_ms( abs_omt_base.xy(),
+                                        z_after ) ) );
+    tripoint_bub_ms omtile_align_end( omtile_align_start + point( omtilesz, omtilesz ) );
+
+    if( get_map().tr_at( u.pos_bub() ) != tr_ledge ) {
+        for( const tripoint_bub_ms &dest : mp.points_in_rectangle( omtile_align_start,
+                omtile_align_end ) ) {
+            if( rl_dist( u.pos_bub(), dest ) <= best &&
                 ( ( going_down_1 && mp.has_flag( ter_furn_flag::TFLAG_GOES_UP, dest ) ) ||
                   ( going_up_1 && ( mp.has_flag( ter_furn_flag::TFLAG_GOES_DOWN, dest ) ||
                                     mp.ter( dest ) == ter_t_manhole_cover ) ) ||
                   ( ( movez == 2 || movez == -2 ) && mp.ter( dest ) == ter_t_elevator ) ) ) {
-                stairs.emplace( dest );
-                best = rl_dist( u.pos(), dest );
+                stairs.emplace( dest.raw() );
+                best = rl_dist( u.pos_bub(), dest );
             }
         }
     }
@@ -12400,7 +12452,7 @@ std::optional<tripoint> game::find_or_make_stairs( map &mp, const int z_after, b
         return stairs;
     }
 
-    if( u.has_effect( effect_gliding ) && get_map().tr_at( u.pos() ) == tr_ledge ) {
+    if( u.has_effect( effect_gliding ) && get_map().tr_at( u.pos_bub() ) == tr_ledge ) {
         return stairs;
     }
 

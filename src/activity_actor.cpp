@@ -173,6 +173,7 @@ static const activity_id ACT_UNLOAD( "ACT_UNLOAD" );
 static const activity_id ACT_UNLOAD_LOOT( "ACT_UNLOAD_LOOT" );
 static const activity_id ACT_VEHICLE_FOLD( "ACT_VEHICLE_FOLD" );
 static const activity_id ACT_VEHICLE_UNFOLD( "ACT_VEHICLE_UNFOLD" );
+static const activity_id ACT_WAIT_STAMINA( "ACT_WAIT_STAMINA" );
 static const activity_id ACT_WASH( "ACT_WASH" );
 static const activity_id ACT_WEAR( "ACT_WEAR" );
 static const activity_id ACT_WIELD( "ACT_WIELD" );
@@ -225,6 +226,8 @@ static const itype_id itype_liquid_soap( "liquid_soap" );
 static const itype_id itype_log( "log" );
 static const itype_id itype_paper( "paper" );
 static const itype_id itype_pseudo_bio_picklock( "pseudo_bio_picklock" );
+static const itype_id
+itype_robofac_yrax_trifacet_deactivation_manual( "robofac_yrax_trifacet_deactivation_manual" );
 static const itype_id itype_soap( "soap" );
 static const itype_id itype_splinter( "splinter" );
 static const itype_id itype_stick_long( "stick_long" );
@@ -242,7 +245,7 @@ static const morale_type morale_shave( "morale_shave" );
 static const move_mode_id move_mode_prone( "prone" );
 static const move_mode_id move_mode_walk( "walk" );
 
-static const mtype_id mon_manhack( "mon_manhack" );
+static const mtype_id mon_yrax_trifacet( "mon_yrax_trifacet" );
 
 static const proficiency_id proficiency_prof_lockpicking( "prof_lockpicking" );
 static const proficiency_id proficiency_prof_lockpicking_expert( "prof_lockpicking_expert" );
@@ -4519,7 +4522,9 @@ bool disable_activity_actor::can_disable_or_reprogram( const monster &monster )
     return ( ( monster.friendly != 0 || monster.has_effect( effect_sensor_stun ) ) &&
              !monster.has_flag( mon_flag_RIDEABLE_MECH ) &&
              !( monster.has_flag( mon_flag_PAY_BOT ) && monster.has_effect( effect_paid ) ) ) &&
-           ( !monster.type->revert_to_itype.is_empty() || monster.type->id == mon_manhack );
+           ( !monster.type->revert_to_itype.is_empty() ) &&
+           ( get_avatar().has_identified( itype_robofac_yrax_trifacet_deactivation_manual ) ||
+             monster.type->id != mon_yrax_trifacet );
 }
 
 int disable_activity_actor::get_disable_turns()
@@ -6347,7 +6352,7 @@ void pickup_menu_activity_actor::do_turn( player_activity &, Character &who )
     std::optional<tripoint_bub_ms> p( where );
     std::vector<drop_location> s( selection );
     who.cancel_activity();
-    who.pick_up( game_menus::inv::pickup( *who.as_avatar(), p, s ) );
+    who.pick_up( game_menus::inv::pickup( p, s ) );
 }
 
 void pickup_menu_activity_actor::serialize( JsonOut &jsout ) const
@@ -8023,7 +8028,7 @@ void pulp_activity_actor::do_turn( player_activity &act, Character &you )
             const mtype *corpse_mtype = corpse.get_mtype();
             const bool acid_immune = you.is_immune_damage( damage_acid ) ||
                                      you.is_immune_field( fd_acid );
-            if( corpse_mtype->bloodType().obj().has_acid && ( !acid_immune || !pulp_acid ) ) {
+            if( !pulp_acid && corpse_mtype->bloodType().obj().has_acid  && !acid_immune ) {
                 //don't smash acid zombies when auto pulping unprotected
                 continue;
             }
@@ -8122,6 +8127,53 @@ std::unique_ptr<activity_actor> pulp_activity_actor::deserialize( JsonValue &jsi
     return actor.clone();
 }
 
+
+void wait_stamina_activity_actor::start( player_activity &act, Character & )
+{
+    act.moves_total = calendar::INDEFINITELY_LONG;
+    act.moves_left = calendar::INDEFINITELY_LONG;
+}
+
+void wait_stamina_activity_actor::do_turn( player_activity &act, Character &you )
+{
+    if( stamina_threshold != -1 ) {
+        // Record intial stamina only when waiting until a given threshold.
+        initial_stamina = you.get_stamina();
+    }
+
+    int stamina_max = stamina_threshold == -1 ? you.get_stamina_max() : stamina_threshold;
+    if( you.get_stamina() >= stamina_max ) {
+        finish( act, you );
+    }
+}
+
+void wait_stamina_activity_actor::finish( player_activity &act, Character &you )
+{
+    if( stamina_threshold != -1 ) {
+        const int stamina_initial = initial_stamina != -1 ? initial_stamina : you.get_stamina();
+        if( you.get_stamina() < stamina_threshold && you.get_stamina() <= stamina_initial ) {
+            debugmsg( "Failed to wait until stamina threshold %d reached, only at %d. You may not be regaining stamina.",
+                      act.values.front(), you.get_stamina() );
+        }
+    } else if( you.get_stamina() < you.get_stamina_max() ) {
+        you.add_msg_if_player( _( "You are bored of waiting, so you stop." ) );
+    } else {
+        you.add_msg_if_player( _( "You finish waiting and feel refreshed." ) );
+    }
+    act.set_to_null();
+}
+
+void wait_stamina_activity_actor::serialize( JsonOut &jsout ) const
+{
+    jsout.write_null();
+}
+
+std::unique_ptr<activity_actor> wait_stamina_activity_actor::deserialize( JsonValue & )
+{
+    return wait_stamina_activity_actor().clone();
+}
+
+
 namespace activity_actors
 {
 
@@ -8187,6 +8239,7 @@ deserialize_functions = {
     { ACT_UNLOAD, &unload_activity_actor::deserialize },
     { ACT_UNLOAD_LOOT, &unload_loot_activity_actor::deserialize },
     { ACT_VEHICLE_FOLD, &vehicle_folding_activity_actor::deserialize },
+    { ACT_WAIT_STAMINA, &wait_stamina_activity_actor::deserialize },
     { ACT_VEHICLE_UNFOLD, &vehicle_unfolding_activity_actor::deserialize },
     { ACT_WASH, &wash_activity_actor::deserialize },
     { ACT_WEAR, &wear_activity_actor::deserialize },
